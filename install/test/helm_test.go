@@ -1395,6 +1395,7 @@ spec:
 				})
 
 				Context("custom gateway", func() {
+
 					Context("when the default values weren't overridden", func() {
 						BeforeEach(func() {
 							prepareMakefile(namespace, helmValues{
@@ -1435,6 +1436,7 @@ spec:
 							Expect(configMapStr.Data).ToNot(BeNil()) // Uses the default config data
 						})
 					})
+
 					Context("when default values are overridden by custom gatewayproxy", func() {
 						BeforeEach(func() {
 							prepareMakefile(namespace, helmValues{
@@ -1477,6 +1479,28 @@ spec:
 							Expect(configMapStr.Data).To(Equal(map[string]string{"customData": "someData"}))
 						})
 					})
+
+					Context("when non-default values are overridden by custom gatewayproxy", func() {
+						BeforeEach(func() {
+							prepareMakefile(namespace, helmValues{
+								valuesArgs: []string{
+									"gatewayProxies.gatewayProxy.service.extraAnnotations.original=original",
+									"gatewayProxies.anotherGatewayProxy.service.extraAnnotations.override=override",
+								},
+							})
+						})
+
+						It("does not merge extraAnnotations for service", func() {
+							serviceUns := testManifest.ExpectCustomResource("Service", namespace, "another-gateway-proxy")
+							service, err := kuberesource.ConvertUnstructured(serviceUns)
+							Expect(err).NotTo(HaveOccurred())
+							Expect(service).To(BeAssignableToTypeOf(&v1.Service{}))
+							serviceStr := *service.(*v1.Service)
+							Expect(serviceStr.ObjectMeta.Annotations).To(Equal(map[string]string{"override": "override"}))
+						})
+
+					})
+
 				})
 
 				Context("when multiple custom gatewayproxy override disabled default proxy", func() {
@@ -2466,26 +2490,6 @@ spec:
 							gatewayProxyDeployment.GetName()).To(BeNil())
 					})
 
-					It("Removes rest_xds_cluster when enableRestEds is false", func() {
-						prepareMakefile(namespace, helmValues{
-							valuesArgs: []string{"settings.enableRestEds=false"},
-						})
-
-						testManifest.SelectResources(func(resource *unstructured.Unstructured) bool {
-							return resource.GetKind() == "ConfigMap"
-						}).ExpectAll(func(configMap *unstructured.Unstructured) {
-							configMapObject, err := kuberesource.ConvertUnstructured(configMap)
-							Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Deployment %+v should be able to convert from unstructured", configMap))
-							structuredConfigMap, ok := configMapObject.(*v1.ConfigMap)
-							Expect(ok).To(BeTrue(), fmt.Sprintf("Deployment %+v should be able to cast to a structured deployment", configMap))
-
-							if structuredConfigMap.Name == "gateway-proxy-envoy-config" {
-								Expect(structuredConfigMap.Data["envoy.yaml"]).To(Not(ContainSubstring("rest_xds_cluster")), "should not have an rest_xds_cluster configured")
-							}
-						})
-
-					})
-
 					It("Adds rest_xds_cluster when enableRestEds is true", func() {
 						prepareMakefile(namespace, helmValues{
 							valuesArgs: []string{"settings.enableRestEds=true"},
@@ -2721,7 +2725,7 @@ spec:
   gloo:
     xdsBindAddr: "0.0.0.0:9977"
     restXdsBindAddr: "0.0.0.0:9976"
-    enableRestEds: true
+    enableRestEds: false
     disableKubernetesDestinations: false
     disableProxyGarbageCollection: false
     invalidConfigPolicy:
